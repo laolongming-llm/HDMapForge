@@ -1,0 +1,32 @@
+# Paths are relative to this file. Prepare the NPZ patches and spatially split
+# manifest offline. This baseline never reads source SHP or raw intensity tiles.
+seed: 42
+output_dir: ../runs/geometry
+data:
+  manifest: ../../prepared/manifest.json
+  batch_size: 2
+  num_workers: 0  # Start at 0 on Windows; profile before increasing.
+  augment: true
+  pin_memory: false
+model:
+  base_channels: 24
+optimizer:
+  lr: 0.001
+  weight_decay: 0.0001
+loss:
+  bce_weight: 1.0
+  dice_weight: 1.0
+  class_weights: [1.0, 1.0, 1.0, 1.0]
+  positive_weights: [1.0, 1.0, 1.0, 1.0]
+# For reviewed lane/stopline alignment uncertainty, encode valid=0 around
+# trustworthy positive ribbons. Loss masking does not correct registration.
+trainer:
+  max_epochs: 100
+  accelerator: auto
+  devices: 1
+  precision: 32-true  # Use 16-mixed only after GPU/AMP validation.
+  accumulate_grad_batches: 4
+  gradient_clip_val: 1.0
+  deterministic: true
+  log_every_n_steps: 10
+# resume_checkpoint: ../runs/geometry/checkpoints/last.ckpt

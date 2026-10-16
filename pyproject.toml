@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hdmapforge"
+version = "0.2.0"
+description = "Hybrid local geometry extraction and vision-language road-line classification"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "numpy>=2.2,<3", "rasterio>=1.4,<2", "shapely>=2.1,<3",
+  "pyproj>=3.7,<4", "pyshp>=3,<4", "PyYAML>=6,<7", "Pillow>=11,<13",
+  "httpx>=0.28,<1", "scipy>=1.15,<2", "scikit-image>=0.25,<1",
+]
+
+[project.optional-dependencies]
+train = ["torch>=2.5,<3", "lightning>=2.6,<3"]
+
+[project.scripts]
+hdmapforge = "hdmapforge.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "ruff>=0.14,<1"]
+
+[[tool.uv.index]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch" }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hdmapforge"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

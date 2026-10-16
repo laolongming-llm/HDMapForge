@@ -1,0 +1,16 @@
+name: Hybrid runtime
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  synthetic-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.11.3'
+          enable-cache: true
+      - run: uv sync --locked --extra train
+      - run: uv run --extra train ruff check src tests
+      - run: uv run --extra train pytest -q

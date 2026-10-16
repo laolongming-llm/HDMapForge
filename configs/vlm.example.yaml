@@ -1,0 +1,15 @@
+# OpenAI-compatible vision endpoint, including compatible Qwen deployments.
+# Choose an available fixed model snapshot after gold-set evaluation.
+provider:
+  base_url: https://YOUR_PROVIDER/v1
+  model: YOUR_EVALUATED_VISION_MODEL
+  api_key_env: HDMAPFORGE_API_KEY
+  cache_path: runs/vlm.sqlite
+  max_requests: 2000  # Includes retries; no automatic paid fine-tuning.
+  retries: 2
+  timeout_s: 90
+runtime:
+  sampling_step_m: 2.0
+  boundary_tolerance_m: 0.25
+  direction_confirmed: false
+  model_validated: false
