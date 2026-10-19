@@ -203,6 +203,111 @@ def test_api_cache_hits_do_not_consume_budget_and_survive_reopen(tmp_path):
             reopened.close()
 
 
+@pytest.mark.parametrize(
+    "enabled_types",
+    [[], [1, 4], [0, 1, 1], [0, True], [0, 1.0], [0, "1"], [0, 99], 1],
+)
+def test_invalid_enabled_types_fail_before_creating_client_or_cache(
+    tmp_path, monkeypatch, enabled_types
+):
+    def forbidden_client(**kwargs):
+        pytest.fail("Invalid type scope must fail before creating an HTTP client")
+
+    monkeypatch.setattr("hdmapforge.vlm.httpx.Client", forbidden_client)
+    cache_path = tmp_path / "new_directory" / "replies.sqlite"
+    with pytest.raises(ValueError, match="enabled_types"):
+        VisionClassifier(
+            base_url="https://example.invalid/v1", model="synthetic-vlm",
+            cache_path=cache_path, enabled_types=enabled_types,
+        )
+    assert not cache_path.parent.exists()
+
+
+@pytest.mark.parametrize(
+    "source_type,code,expected_allowed,expected_result",
+    [
+        (None, 2, [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+         {"jd_type": 0, "status": "unknown", "score": 0.0}),
+        (1, 2, [0, 1], {"jd_type": 0, "status": "unknown", "score": 0.0}),
+        (2, 4, [0, 3, 4], {"jd_type": 4, "status": "ok", "score": 0.9}),
+        (3, 7, [0, 7], {"jd_type": 7, "status": "ok", "score": 0.9}),
+    ],
+)
+def test_enabled_scope_intersects_source_family_and_preserves_double_solid(
+    tmp_path, source_type, code, expected_allowed, expected_result
+):
+    def handler(request):
+        body = json.loads(request.content)
+        context = json.loads(body["messages"][1]["content"][0]["text"])
+        assert context["allowed_types"] == expected_allowed
+        assert 2 not in context["allowed_types"]
+        return httpx.Response(200, json=response_payload(code))
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        classifier = VisionClassifier(
+            base_url="https://example.invalid/v1", model="synthetic-vlm",
+            api_key_env="HDMAPFORGE_TEST_KEY", cache_path=tmp_path / "replies.sqlite",
+            enabled_types=[0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11], client=client,
+        )
+        try:
+            assert classifier.classify(crop_payload(), source_type=source_type) == expected_result
+            assert classifier.classify(crop_payload(), source_type=source_type) == expected_result
+            assert classifier.calls == 1
+        finally:
+            classifier.close()
+
+
+def test_type_scope_isolates_cache_and_rechecks_cached_replies(tmp_path):
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, json=response_payload(2))
+
+    cache_path = tmp_path / "replies.sqlite"
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        full = VisionClassifier(
+            base_url="https://example.invalid/v1", model="synthetic-vlm",
+            api_key_env="HDMAPFORGE_TEST_KEY", cache_path=cache_path, client=client,
+        )
+        try:
+            assert full.classify(crop_payload())["jd_type"] == 2
+        finally:
+            full.close()
+        scoped = VisionClassifier(
+            base_url="https://example.invalid/v1", model="synthetic-vlm",
+            api_key_env="HDMAPFORGE_TEST_KEY", cache_path=cache_path,
+            enabled_types=[0, 1, 4], client=client,
+        )
+        try:
+            unknown = {"jd_type": 0, "status": "unknown", "score": 0.0}
+            assert scoped.classify(crop_payload()) == unknown
+            assert len(requests) == 2  # Broader-scope cache cannot answer this request.
+            scoped.cache.execute(
+                "UPDATE replies SET value=?", (json.dumps({
+                    "jd_type": 2, "status": "ok", "score": 0.9,
+                }),),
+            )
+            scoped.cache.commit()
+            assert scoped.classify(crop_payload()) == unknown
+            assert scoped.calls == 1 and len(requests) == 2
+            # The same pixels with source-family context have another cache key.
+            assert scoped.classify(crop_payload(), source_type=1) == unknown
+            assert scoped.calls == 2 and len(requests) == 3
+        finally:
+            scoped.close()
+
+
+def test_scoped_responses_still_reject_illegal_codes_family_and_direction():
+    for code, source_type, direction_confirmed in [(99, None, True), (4, 1, True),
+                                                    (5, None, False), (6, None, False)]:
+        with pytest.raises(ValueError):
+            validate_response(
+                {"jd_type": code, "status": "ok", "score": 0.9},
+                source_type, direction_confirmed, enabled_types=[0, 1, 4],
+            )
+
+
 def test_invalid_api_type_is_not_cached_but_billable_usage_is_recorded(tmp_path):
     requests = []
 
