@@ -80,8 +80,9 @@ def mask_polygons(mask, affine, *, envelope=False, minimum_area_m2=0.1):
         for part in parts:
             if part.geom_type != "Polygon" or part.area < minimum_area_m2:
                 continue
-            # Convex hull is the minimum convex enclosing polygon, not a rotated rectangle.
             truncated = part.boundary.intersects(frame.boundary)
-            part = part.minimum_rotated_rectangle if envelope else part.convex_hull
+            # Arrow instances use a rectangle. Crosswalks keep their enclosing
+            # region's concavities, including the gap between an L shape's arms.
+            part = part.minimum_rotated_rectangle if envelope else Polygon(part.exterior)
             result.append({"geometry": part, "review": truncated})
     return result

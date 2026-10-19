@@ -116,6 +116,22 @@ def test_polygon_touching_region_boundary_requires_review():
     assert interior["review"] is False
 
 
+def test_crosswalk_envelope_preserves_gap_between_l_shaped_arms():
+    mask = np.zeros((30, 30), dtype=bool)
+    mask[4:24, 4:9] = True
+    mask[19:24, 4:24] = True
+    # Small holes inside the crossing are enclosed, while its exterior concavity
+    # must stay outside the exported crossing region.
+    mask[10:12, 6:8] = False
+    affine = from_origin(0, 3, 0.1, 0.1)
+    crossing = mask_polygons(mask, affine)[0]["geometry"]
+    expected = Polygon([(0.4, 2.6), (0.9, 2.6), (0.9, 1.1),
+                        (2.4, 1.1), (2.4, 0.6), (0.4, 0.6)])
+    assert crossing.symmetric_difference(expected).area == pytest.approx(0, abs=1e-10)
+    rectangle = mask_polygons(mask, affine, envelope=True)[0]["geometry"]
+    assert rectangle.area > crossing.area
+
+
 def test_chainage_does_not_smooth_away_observed_short_state():
     line = LineString([(0, 0), (10, 0)])
     observations = [
