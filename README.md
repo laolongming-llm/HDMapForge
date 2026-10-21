@@ -9,7 +9,7 @@
 | `CROSSWALK.shp` | 每个斑马线整体区域的外包面，保留 L 形凹部，无类型分类 |
 | `STOPLINE.shp` | 停止线线要素，无类型分类 |
 
-当前是可运行的**几何训练与区域推理基线**。已用合成数据验证CPU训练、checkpoint回载和离线API协议；没有真实数据训练的权重或工程精度结论。完整大范围的实例分离、跨源图拼接和生产验收仍需实现与实测。旧版思路和预处理/审查代码不属于此仓库。
+当前是可运行的**几何训练与区域推理基线**。已完成真实强度数据的首轮 GPU 训练及区域验证，当前仍有断线、漏检和实例分离问题，需继续改进。数据、训练权重和实验报告保存在私有工作区。完整大范围的实例分离、跨源图拼接和生产验收仍需实现与实测。旧版思路和预处理/审查代码不属于此仓库。
 
 ## 运行
 
@@ -32,7 +32,16 @@ uv run --extra train hdmapforge export --probabilities outputs/probabilities.tif
 
 先将示例的endpoint、固定模型版本和预算改为实际配置。客户端使用兼容OpenAI Chat Completions的图像/JSON协议，支持此协议的Qwen部署等服务可接入；其他协议需要独立适配。API key占位符不应写进Git。客户端有请求次数上限、重试、缓存与token计数，默认不会创建微调任务。
 
-GPU训练需按驱动和服务器配置选择经过验证的PyTorch/CUDA组合。项目使用命名索引 `pytorch`；可按 [uv官方PyTorch说明](https://docs.astral.sh/uv/guides/integration/pytorch/)覆盖索引并为服务器重新锁定环境。本机CPU测试通过不代表CUDA环境已经验证。若本机环境变量 `PROJ_LIB/PROJ_DATA` 指向旧PostGIS，应在独立进程中使用本环境自带PROJ数据，避免错误CRS库。
+GPU 训练已验证的组合为 Python 3.12、PyTorch 2.11.0+cu128、Lightning 2.6.6、RTX 4060 Laptop 8GB。可用独立环境按 [uv 官方 PyTorch 说明](https://docs.astral.sh/uv/guides/integration/pytorch/)选择 CUDA 后端：
+
+```powershell
+uv venv .venv-gpu --python 3.12
+uv pip install --python .venv-gpu/Scripts/python.exe --torch-backend=cu128 'torch==2.11.0' -e '.[train]'
+& .venv-gpu/Scripts/python.exe -c "import torch; assert torch.cuda.is_available(); print(torch.__version__, torch.cuda.get_device_name(0))"
+& .venv-gpu/Scripts/python.exe -m hdmapforge.training --config configs/train.gpu.example.yaml
+```
+
+先设置示例 manifest 路径与训练集正例权重。GPU 示例强制 `accelerator=gpu`，采用混合精度、梯度累计和可配置早停；省略 `early_stopping` 时保持原有训练行为。`deterministic=warn` 固定随机种子并报告未支持的确定性操作，不承诺跨版本或续跑时逐位一致。项目默认 CPU 锁文件用于功能验证，普通 `uv sync --locked --extra train` 会选择 CPU torch；独立 GPU 环境使用上面的解释器直接运行。若本机环境变量 `PROJ_LIB/PROJ_DATA` 指向旧PostGIS，应在独立进程中使用本环境自带PROJ数据，避免错误CRS库。
 
 ## 必要数据契约
 
@@ -44,7 +53,7 @@ manifest为JSON列表或 `{"samples": [...]}`，每条包含 `path`、`split`（
 - `targets`：4HW、[0,1]，固定顺序 `lane, arrow, crosswalk, stopline`。
 - `valid`：4HW、二元掩膜；未标注、无覆盖或标签位置不确定带设0。
 
-车道与停止线目标是连续制图几何；箭头目标为外包矩形区域；斑马线为整体面。虚线空隙可以属于连续几何监督，不能把它冒充实际油漆监督。`valid`掩膜用于减少错误监督，**不能校正原始标签偏移**。系统偏移与局部偏移需在线下用有约束配准处理，并保留配准前后的人工依据。
+车道与停止线目标是连续制图几何；箭头目标为外包矩形区域；斑马线为整体面。虚线空隙可以属于连续几何监督，不能把它冒充实际油漆监督。`valid`掩膜用于减少错误监督，**不能校正原始标签偏移**。系统偏移与局部偏移需在线下用有约束配准处理，并保留影像证据。面内有条纹不等于源面包住完整斑马线；漏包络和实物实例分组需在数据准备阶段处理，未确定外延不能默认背景。参考不完整时，源面外预测不能直接解释为实物误检。
 
 训练只输出四类几何概率，不含车道或箭头类型分类头。相同物理路段、原线族和重叠采集区必须同一空间组；loader拒绝group跨split。当前是轻量Residual U-Net + masked BCE/Dice、Lightning、AdamW、best/last checkpoint与CSV日志。没有精细油漆真值时不启用paint辅助头。
 

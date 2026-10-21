@@ -1,0 +1,40 @@
+# GPU example: the model, AMP and stopping policy were exercised on an
+# RTX 4060 Laptop (8GB), PyTorch 2.11.0+cu128 and Lightning 2.6.6.
+# Paths are relative to this YAML. Samples must already satisfy the data contract.
+seed: 42
+output_dir: ../runs/geometry_gpu
+data:
+  manifest: ../../prepared/manifest.json
+  batch_size: 2
+  num_workers: 0
+  augment: true
+  pin_memory: true
+model:
+  base_channels: 24
+optimizer:
+  lr: 0.001
+  weight_decay: 0.0001
+loss:
+  bce_weight: 1.0
+  dice_weight: 1.0
+  class_weights: [1.0, 1.0, 1.0, 1.0]
+  # Replace using statistics from the training split only. These neutral
+  # placeholders are not the private pilot dataset's positive weights.
+  positive_weights: [1.0, 1.0, 1.0, 1.0]
+trainer:
+  max_epochs: 100
+  accelerator: gpu
+  devices: 1
+  precision: 16-mixed
+  accumulate_grad_batches: 4
+  gradient_clip_val: 1.0
+  deterministic: warn
+  benchmark: false
+  num_sanity_val_steps: 2
+  log_every_n_steps: 5
+early_stopping:
+  monitor: val_loss
+  mode: min
+  patience: 10
+  min_delta: 0.001
+# resume_checkpoint: ../runs/geometry_gpu/checkpoints/last.ckpt

@@ -10,7 +10,7 @@ from typing import Any
 import lightning as L
 import torch
 import yaml
-from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
+from lightning.pytorch.callbacks import EarlyStopping, LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger
 
 from .data import GeometryDataModule
@@ -104,6 +104,14 @@ def train(config: Mapping[str, Any], *, config_dir: str | Path | None = None) ->
         save_last=True,
         auto_insert_metric_name=False,
     )
+    callbacks = [checkpoint, LearningRateMonitor(logging_interval="epoch")]
+    early_stopping = config.get("early_stopping")
+    if early_stopping is not None:
+        if not isinstance(early_stopping, Mapping):
+            raise TypeError("early_stopping must be a mapping of Lightning EarlyStopping options")
+        callbacks.append(EarlyStopping(**{
+            "monitor": "val_loss", "mode": "min", **dict(early_stopping)
+        }))
     trainer_config = {
         "max_epochs": 100,
         "accelerator": "auto",
@@ -118,7 +126,7 @@ def train(config: Mapping[str, Any], *, config_dir: str | Path | None = None) ->
         **trainer_config,
         default_root_dir=output,
         logger=CSVLogger(save_dir=output, name="metrics"),
-        callbacks=[checkpoint, LearningRateMonitor(logging_interval="epoch")],
+        callbacks=callbacks,
     )
     resume = config.get("resume_checkpoint")
     trainer.fit(

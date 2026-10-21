@@ -1,5 +1,6 @@
 """Exercise masking, split isolation and an actual checkpoint/inference cycle."""
 
+import csv
 import json
 
 import numpy as np
@@ -41,7 +42,8 @@ def test_manifest_rejects_group_leakage(tmp_path):
         read_manifest(manifest)
 
 
-def test_tiny_training_checkpoint_prediction(tmp_path):
+@pytest.mark.parametrize("early_stop", [False, True])
+def test_tiny_training_checkpoint_prediction(tmp_path, early_stop):
     # Synthetic data verifies mechanics only; it is not a road-accuracy estimate.
     torch.set_num_threads(1)
     image = np.zeros((32, 32), dtype=np.float32)
@@ -64,9 +66,11 @@ def test_tiny_training_checkpoint_prediction(tmp_path):
             "seed": 13,
             "data": {"manifest": str(manifest), "batch_size": 1, "augment": False},
             "model": {"base_channels": 4},
+            **({"optimizer": {"lr": 0.0},
+                "early_stopping": {"patience": 0, "min_delta": 0.0}} if early_stop else {}),
             "output_dir": str(tmp_path / "run"),
             "trainer": {
-                "max_epochs": 1,
+                "max_epochs": 5 if early_stop else 1,
                 "accelerator": "cpu",
                 "devices": 1,
                 "limit_train_batches": 1,
@@ -80,6 +84,15 @@ def test_tiny_training_checkpoint_prediction(tmp_path):
     )
     assert checkpoint.exists()
     assert (checkpoint.parent / "last.ckpt").exists()
+    if early_stop:
+        # lr=0 keeps validation loss constant; stop after the first bad epoch,
+        # well before the configured budget, and retain a reloadable checkpoint.
+        # Lightning may reuse the unchanged best checkpoint for save_last.
+        # The logged validation epochs establish the actual stopping time.
+        with (tmp_path / "run/metrics/version_0/metrics.csv").open(newline="") as stream:
+            validation_epochs = [int(row["epoch"]) for row in csv.DictReader(stream)
+                                 if row.get("val_loss")]
+        assert validation_epochs == [0, 1]
     predict = load_predictor(checkpoint)
     probability = predict(image)
     assert probability.shape == (4, 32, 32)
